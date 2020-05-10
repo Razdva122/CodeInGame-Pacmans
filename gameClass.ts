@@ -75,6 +75,7 @@ class Game {
   memoryMap: TMap;
   width: number;
   height: number;
+  myPacs: IPac[] = [];
   pacsTargets: { [key: string]: true } = {};
   instructions: string[] = [];
 
@@ -86,6 +87,7 @@ class Game {
   }
 
   startNewTurn(): void {
+    this.myPacs = [];
     this.instructions = [];
     this.pacsTargets = {};
     this.map = this.memoryMap.map((row) => [...row]);
@@ -93,20 +95,96 @@ class Game {
 
   makeCoordsValid(coords: ICoords): ICoords {
     const updatedCoords = { ...coords };
-    
+    if (updatedCoords.x < 0) {
+      updatedCoords.x = this.width + updatedCoords.x;
+    } else if (updatedCoords.x >= this.width) {
+      updatedCoords.x = updatedCoords.x - this.width;
+    }
+
+    if (updatedCoords.y < 0) {
+      updatedCoords.y = this.height + updatedCoords.x;
+    } else if (updatedCoords.y >= this.height) {
+      updatedCoords.y = updatedCoords.y - this.height;
+    }
 
     return updatedCoords;
   }
 
-  addPacToBoard(pac: IPac): void {
+  addElementToBoard(symbol: TVisualCell, coords: ICoords, toMemory?: boolean): void {
+    if (toMemory) {
+      this.memoryMap[coords.y][coords.x] = symbol;
+    } else {
+      this.map[coords.y][coords.x] = symbol;
+    }
+  }
 
+  getElementFromMap(coords: ICoords): TVisualCell {
+    return this.map[coords.y][coords.x];
+  }
+
+  addPacToBoard(pac: IPac): void {
+    if (pac.isMine) {
+      this.myPacs.push(pac);
+    }
+    const pacSymbol = this.PACS[pac.isMine ? 'my' : 'enemy'][pac.type];
+    this.addElementToBoard(pacSymbol, pac.pos);
+    this.addElementToBoard(this.CONSTS_UNITS.empty, pac.pos, true);
   }
 
   addPelletToBoard(pellet: IPellet): void {
+    const pelletSymbol = pellet.value === 1 ? this.CONSTS_UNITS.onePoint : this.CONSTS_UNITS.tenPoints;
+    this.addElementToBoard(pelletSymbol, pellet.pos);
+  }
 
+  createPossibleMovesFromPosition(pos: ICoords): ICoords[] {
+    return this.possibleMoves.map((move) => {
+      return {
+        x: move.x + pos.x,
+        y: move.y + pos.y,
+      }
+    })
+  }
+
+  createPacTurn(pac: IPac): void {
+    if (!pac.cd) {
+      this.instructions.push(`SPEED ${pac.id}`);
+      return;
+    }
+    const memory: {[key: string]: true} = {...this.pacsTargets};
+    const stack: ICoords[] = this.createPossibleMovesFromPosition(pac.pos);
+    while (stack.length) {
+      const checkPos = this.makeCoordsValid(stack.splice(0, 1)[0]);
+      if (memory[`${checkPos.y} ${checkPos.x}`]) {
+        continue;
+      }
+
+      memory[`${checkPos.y} ${checkPos.x}`] = true;
+      const element = this.getElementFromMap(checkPos);
+
+      const givePointsForThisType = {
+        ...this.givePoints,
+        [this.EAT[pac.type]]: true,
+      };
+      const canMoveForThisType = {
+        ...this.canMove,
+        [this.EAT[pac.type]]: true,
+      };
+
+      if (givePointsForThisType[element]) {
+        this.pacsTargets[`${checkPos.y} ${checkPos.x}`] = true;
+        this.instructions.push(`MOVE ${pac.id} ${checkPos.x} ${checkPos.y}`);
+        return;
+      } else if (canMoveForThisType[element]) {
+        stack.push(...this.createPossibleMovesFromPosition(checkPos))
+      }
+    }
+    this.instructions.push(`MOVE ${pac.id} ${pac.pos.x} ${pac.pos.y}`);
   }
 
   makeTurn(): void {
+    this.myPacs.forEach((pac) => {
+      this.createPacTurn(pac);
+    });
     // Debug
     console.error(this.map.map((row) => row.join('')));
     // Output
@@ -120,7 +198,7 @@ const width: number = parseInt(inputs[0]); // size of the grid
 const height: number = parseInt(inputs[1]); // top left corner is (x=0, y=0)
 for (let i = 0; i < height; i++) {
   const row: string = readline(); // one line of the grid: space " " is floor, pound "#" is wall
-  mapInput.push(row.split(''));
+  mapInput.push(row.split('') as TVisualCell[]);
 }
 
 const game = new Game(mapInput, width, height);
@@ -137,7 +215,7 @@ while (true) {
     const mine: boolean = inputs[1] !== '0'; // true if this pac is yours
     const x: number = parseInt(inputs[2]); // position in the grid
     const y: number = parseInt(inputs[3]); // position in the grid
-    const typeId: TPac = inputs[4] as TPac;
+    const typeId: TPacType = inputs[4] as TPacType;
     const abilityCooldown: number = parseInt(inputs[6]);
     const speedTurnsLeft: number = parseInt(inputs[5]);
     game.addPacToBoard({
