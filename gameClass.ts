@@ -118,6 +118,36 @@ class Game {
     }
   }
 
+  getInfoFromPacVision(pac: IPac): void {
+    this.possibleMoves.forEach((move) => {
+      let counter = 1;
+      let positionForCheck: ICoords = this.makeCoordsValid({
+        x: pac.pos.x + move.x,
+        y: pac.pos.y + move.y,
+      });
+      interface IFlags {
+        weCheckAllPos: boolean;
+        weReachWall: boolean;
+      }
+      const flags: IFlags = {} as IFlags;
+      Object.defineProperties(flags, {
+        weCheckAllPos: { get: () => positionForCheck.x === pac.pos.x && positionForCheck.y === pac.pos.y },
+        weReachWall: { get: () => this.getElementFromMap(positionForCheck) === this.CONSTS_UNITS.wall },
+      });
+      while (!(flags.weReachWall || flags.weCheckAllPos)) {
+        if (this.getElementFromMap(positionForCheck) === this.CONSTS_UNITS.unrevealed) {
+          this.addElementToBoard(this.CONSTS_UNITS.empty, positionForCheck);
+          this.addElementToBoard(this.CONSTS_UNITS.empty, positionForCheck, true);
+        }
+        counter += 1;
+        positionForCheck = this.makeCoordsValid({
+          x: pac.pos.x + (move.x * counter),
+          y: pac.pos.y + (move.y * counter),
+        });
+      }
+    })
+  }
+
   getElementFromMap(coords: ICoords): TVisualCell {
     return this.map[coords.y][coords.x];
   }
@@ -182,6 +212,9 @@ class Game {
   }
 
   makeTurn(): void {
+    this.myPacs.forEach((pac) => {
+      this.getInfoFromPacVision(pac);
+    });
     this.myPacs.forEach((pac) => {
       this.createPacTurn(pac);
     });
