@@ -88,7 +88,6 @@ class Game {
   }
 
   startNewTurn(): void {
-    console.error('Clear hashMap');
     this.myPacs = [];
     this.instructions = [];
     this.pacsTargets = {};
@@ -184,7 +183,8 @@ class Game {
         this.hashMapTenPoints[`${coords.x} ${coords.y}`] = coordsBonus;
         nextLevel.push(...this.createPossibleMovesFromPosition(coords));
       });
-      nextLevel = nextLevel.filter((cell) => {
+      nextLevel = nextLevel.map((cell) => this.makeCoordsValid(cell))
+      .filter((cell) => {
         const isNotWall = this.getElementFromMap(cell) !== this.CONSTS_UNITS.wall;
         const weWasHere = this.hashMapTenPoints[`${cell.x} ${cell.y}`];
         return isNotWall && !weWasHere;
@@ -239,7 +239,13 @@ class Game {
 
       if (givePointsForThisType[element]) {
         this.pacsTargets[`${checkPos.x} ${checkPos.y}`] = true;
-        this.instructions.push(`MOVE ${pac.id} ${checkPos.x} ${checkPos.y}`);
+        const secondTargets = this.createPossibleMovesFromPosition(checkPos).map((pos) => this.makeCoordsValid(pos));
+        const secondTarget = secondTargets.find((target) => givePointsForThisType[this.getElementFromMap(target)])
+        if (secondTarget) {
+          this.instructions.push(`MOVE ${pac.id} ${secondTarget.x} ${secondTarget.y}`);
+        } else {
+          this.instructions.push(`MOVE ${pac.id} ${checkPos.x} ${checkPos.y}`);
+        }
         return;
       } else if (canMoveForThisType[element]) {
         stack.push(...this.createPossibleMovesFromPosition(checkPos))
