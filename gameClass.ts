@@ -75,6 +75,7 @@ class Game {
   memoryMap: TMap;
   width: number;
   height: number;
+  hashMapTenPoints: { [key: string]: ICoords } = {};
   myPacs: IPac[] = [];
   pacsTargets: { [key: string]: true } = {};
   instructions: string[] = [];
@@ -87,10 +88,12 @@ class Game {
   }
 
   startNewTurn(): void {
+    console.error('Clear hashMap');
     this.myPacs = [];
     this.instructions = [];
     this.pacsTargets = {};
     this.map = this.memoryMap.map((row) => [...row]);
+    this.hashMapTenPoints = {};
   }
 
   makeCoordsValid(coords: ICoords): ICoords {
@@ -162,8 +165,36 @@ class Game {
   }
 
   addPelletToBoard(pellet: IPellet): void {
-    const pelletSymbol = pellet.value === 1 ? this.CONSTS_UNITS.onePoint : this.CONSTS_UNITS.tenPoints;
+    let pelletSymbol;
+    if (pellet.value === 1) {
+      pelletSymbol = this.CONSTS_UNITS.onePoint;
+    } else {
+      pelletSymbol = this.CONSTS_UNITS.tenPoints;
+      this.generateHashMapForTenPoints(pellet.pos);
+    }
     this.addElementToBoard(pelletSymbol, pellet.pos);
+  }
+
+  generateHashMapForTenPoints(coordsBonus: ICoords): void {
+    const amountOfCellsTillTenPoints = 5;
+    let prevLevel: ICoords[] = [coordsBonus];
+    let nextLevel: ICoords[] = [];
+    for (let i = 0; i < amountOfCellsTillTenPoints; i += 1) {
+      prevLevel.forEach((coords) => {
+        this.hashMapTenPoints[`${coords.x} ${coords.y}`] = coordsBonus;
+        nextLevel.push(...this.createPossibleMovesFromPosition(coords));
+      });
+      nextLevel = nextLevel.filter((cell) => {
+        const isNotWall = this.getElementFromMap(cell) !== this.CONSTS_UNITS.wall;
+        const weWasHere = this.hashMapTenPoints[`${cell.x} ${cell.y}`];
+        return isNotWall && !weWasHere;
+      });
+      prevLevel = nextLevel;
+      nextLevel = [];
+    }
+    prevLevel.forEach((coords) => {
+      this.hashMapTenPoints[`${coords.x} ${coords.y}`] = coordsBonus;
+    });
   }
 
   createPossibleMovesFromPosition(pos: ICoords): ICoords[] {
@@ -181,14 +212,20 @@ class Game {
       return;
     }
     const memory: {[key: string]: true} = {...this.pacsTargets};
+    const closeTenPoints = this.hashMapTenPoints[`${pac.pos.x} ${pac.pos.y}`];
+    if (closeTenPoints && !memory[`${closeTenPoints.x} ${closeTenPoints.y}`]) {
+      this.pacsTargets[`${closeTenPoints.x} ${closeTenPoints.y}`] = true;
+      this.instructions.push(`MOVE ${pac.id} ${closeTenPoints.x} ${closeTenPoints.y}`);
+      return;
+    }
     const stack: ICoords[] = this.createPossibleMovesFromPosition(pac.pos);
     while (stack.length) {
       const checkPos = this.makeCoordsValid(stack.splice(0, 1)[0]);
-      if (memory[`${checkPos.y} ${checkPos.x}`]) {
+      if (memory[`${checkPos.x} ${checkPos.y}`]) {
         continue;
       }
 
-      memory[`${checkPos.y} ${checkPos.x}`] = true;
+      memory[`${checkPos.x} ${checkPos.y}`] = true;
       const element = this.getElementFromMap(checkPos);
 
       const givePointsForThisType = {
@@ -201,7 +238,7 @@ class Game {
       };
 
       if (givePointsForThisType[element]) {
-        this.pacsTargets[`${checkPos.y} ${checkPos.x}`] = true;
+        this.pacsTargets[`${checkPos.x} ${checkPos.y}`] = true;
         this.instructions.push(`MOVE ${pac.id} ${checkPos.x} ${checkPos.y}`);
         return;
       } else if (canMoveForThisType[element]) {
