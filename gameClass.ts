@@ -30,6 +30,16 @@ interface IPacTypes {
   enemy: { [key in TPacType]: TVisualCell };
 }
 
+type TPacStatus = 'dead' | 'alive' | 'stuck';
+
+interface IMemoryPac {
+  id: number;
+  status: TPacStatus;
+  lastPos: string;
+  stayAtPos: number;
+  toDo: '' | 'changeType' | 'wait';
+}
+
 class Game {
   CONSTS_UNITS: { [key: string]: TVisualCell } = {
     unrevealed: ' ',
@@ -76,6 +86,7 @@ class Game {
   width: number;
   height: number;
   hashMapTenPoints: { [key: string]: ICoords } = {};
+  myPacsMemory: IMemoryPac[] = [];
   myPacs: IPac[] = [];
   pacsTargets: { [key: string]: true } = {};
   instructions: string[] = [];
@@ -175,7 +186,7 @@ class Game {
   }
 
   generateHashMapForTenPoints(coordsBonus: ICoords): void {
-    const amountOfCellsTillTenPoints = 5;
+    const amountOfCellsTillTenPoints = 8;
     let prevLevel: ICoords[] = [coordsBonus];
     let nextLevel: ICoords[] = [];
     for (let i = 0; i < amountOfCellsTillTenPoints; i += 1) {
@@ -184,11 +195,11 @@ class Game {
         nextLevel.push(...this.createPossibleMovesFromPosition(coords));
       });
       nextLevel = nextLevel.map((cell) => this.makeCoordsValid(cell))
-      .filter((cell) => {
-        const isNotWall = this.getElementFromMap(cell) !== this.CONSTS_UNITS.wall;
-        const weWasHere = this.hashMapTenPoints[`${cell.x} ${cell.y}`];
-        return isNotWall && !weWasHere;
-      });
+        .filter((cell) => {
+          const isNotWall = this.getElementFromMap(cell) !== this.CONSTS_UNITS.wall;
+          const weWasHere = this.hashMapTenPoints[`${cell.x} ${cell.y}`];
+          return isNotWall && !weWasHere;
+        });
       prevLevel = nextLevel;
       nextLevel = [];
     }
@@ -206,16 +217,41 @@ class Game {
     })
   }
 
+  clearMemoryOfPac(mem: IMemoryPac): void {
+    mem.toDo = '';
+    mem.status = 'alive';
+    mem.stayAtPos = 0;
+  }
+
   createPacTurn(pac: IPac): void {
+    const memoryThisPac = this.myPacsMemory.find((pacM) => pacM.id === pac.id);
     if (!pac.cd) {
-      this.instructions.push(`SPEED ${pac.id}`);
+      if (memoryThisPac.toDo) {
+        console.error(memoryThisPac);
+        if (memoryThisPac.toDo === 'changeType') {
+          this.clearMemoryOfPac(memoryThisPac);
+          const changeTypes = {
+            ROCK : 'PAPER',
+            PAPER : 'SCISSORS',
+            SCISSORS : 'ROCK',
+          };
+          this.instructions.push(`SWITCH ${pac.id} ${changeTypes[pac.type]} Switch`);
+          return;
+        }
+        if (memoryThisPac.toDo === 'wait') {
+          this.clearMemoryOfPac(memoryThisPac);
+          this.instructions.push(`MOVE ${pac.id} ${pac.pos.x} ${pac.pos.y} Stuck`);
+          return;
+        }
+      }
+      this.instructions.push(`SPEED ${pac.id} speedUp`);
       return;
     }
     const memory: {[key: string]: true} = {...this.pacsTargets};
     const closeTenPoints = this.hashMapTenPoints[`${pac.pos.x} ${pac.pos.y}`];
     if (closeTenPoints && !memory[`${closeTenPoints.x} ${closeTenPoints.y}`]) {
       this.pacsTargets[`${closeTenPoints.x} ${closeTenPoints.y}`] = true;
-      this.instructions.push(`MOVE ${pac.id} ${closeTenPoints.x} ${closeTenPoints.y}`);
+      this.instructions.push(`MOVE ${pac.id} ${closeTenPoints.x} ${closeTenPoints.y} Big`);
       return;
     }
     const stack: ICoords[] = this.createPossibleMovesFromPosition(pac.pos);
@@ -241,23 +277,84 @@ class Game {
         this.pacsTargets[`${checkPos.x} ${checkPos.y}`] = true;
         const secondTargets = this.createPossibleMovesFromPosition(checkPos).map((pos) => this.makeCoordsValid(pos));
         const secondTarget = secondTargets.find((target) => givePointsForThisType[this.getElementFromMap(target)])
-        if (secondTarget) {
-          this.instructions.push(`MOVE ${pac.id} ${secondTarget.x} ${secondTarget.y}`);
+        if (secondTarget && pac.speedLeft) {
+          this.instructions.push(`MOVE ${pac.id} ${secondTarget.x} ${secondTarget.y} 2 moves`);
         } else {
-          this.instructions.push(`MOVE ${pac.id} ${checkPos.x} ${checkPos.y}`);
+          this.instructions.push(`MOVE ${pac.id} ${checkPos.x} ${checkPos.y} 1 move`);
         }
         return;
       } else if (canMoveForThisType[element]) {
         stack.push(...this.createPossibleMovesFromPosition(checkPos))
       }
     }
-    this.instructions.push(`MOVE ${pac.id} ${pac.pos.x} ${pac.pos.y}`);
+    this.instructions.push(`MOVE ${pac.id} ${pac.pos.x} ${pac.pos.y} no turns`);
+  }
+
+  updatePacsStatus(): void {
+    if (this.myPacsMemory.length === 0) {
+      this.myPacsMemory = this.myPacs.map((pac) => {
+        return {
+          id: pac.id,
+          status: 'alive',
+          lastPos: `X: ${pac.pos.x}, Y: ${pac.pos.y}`,
+          stayAtPos: 0,
+          toDo: '',
+        }
+      })
+    } else {
+      this.myPacsMemory.filter((pacMemory) => pacMemory.status !== 'dead')
+        .forEach((pacMemory) => {
+          const pac = this.myPacs.find((pac) => pac.id === pacMemory.id);
+          if (!pac) {
+            pacMemory.status === 'dead';
+            return;
+          }
+          if (pacMemory.lastPos === `X: ${pac.pos.x}, Y: ${pac.pos.y}`) {
+            pacMemory.stayAtPos += 1;
+            if (pacMemory.stayAtPos >= 3) {
+              pacMemory.status = 'stuck';
+              if (this.isEnemyIn2Cells(pac.pos)) {
+                pacMemory.toDo = 'changeType';
+              } else {
+                if (!this.myPacsMemory.some((pacMem) => pacMem.toDo === 'wait')) {
+                  pacMemory.toDo = 'wait';
+                }
+              }
+            }
+          } else {
+            pacMemory.lastPos = `X: ${pac.pos.x}, Y: ${pac.pos.y}`;
+            pacMemory.toDo = '';
+            pacMemory.stayAtPos = 0;
+            pacMemory.status = 'alive';
+          }
+        })
+    }
+  }
+
+  isEnemyIn2Cells(coords: ICoords): boolean {
+    const positions: ICoords[] = this.createPossibleMovesFromPosition(coords)
+      .map((coords) => {
+        return this.makeCoordsValid(coords);
+      })
+      .reduce((acc, item) => {
+        acc.push(...this.createPossibleMovesFromPosition(item).map((coords) => {
+            return this.makeCoordsValid(coords);
+          }));
+        return acc;
+      }, []);
+    return positions.some((item) => {
+        const el = this.getElementFromMap(item);
+        return Object.keys(this.PACS.enemy).map((ind) => this.PACS.enemy[ind]).includes(el);
+      })
   }
 
   makeTurn(): void {
+    // Смотрим что паки видят
     this.myPacs.forEach((pac) => {
       this.getInfoFromPacVision(pac);
     });
+    this.updatePacsStatus();
+    // Создаем ход для каждого
     this.myPacs.forEach((pac) => {
       this.createPacTurn(pac);
     });
